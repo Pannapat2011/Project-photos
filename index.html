@@ -44,7 +44,8 @@
         .drop-zone:hover { background: rgba(0, 122, 255, 0.08); transform: scale(1.02); }
         .drop-zone.dragover { background: rgba(0, 122, 255, 0.15); border-color: #0056b3; }
         .drop-zone svg { width: 50px; height: 50px; fill: #007AFF; margin-bottom: 10px; }
-        .drop-zone span { display: block; color: #007AFF; font-weight: 500; font-size: 16px; }
+        .drop-zone span { display: block; color: #007AFF; font-weight: 500; font-size: 16px; margin-bottom: 8px; }
+        .drop-zone .paste-badge { background: #007AFF; color: white; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; display: inline-block; margin-bottom: 10px; }
         .drop-zone p { color: #8E8E93; font-size: 13px; margin-top: 5px; }
         
         #file-input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
@@ -102,6 +103,7 @@
 
     <div class="upload-container">
         <div class="header">
+            <!-- ดึงโลโก้องค์กรของมึงมาแสดง -->
             <img src="https://img2.pic.in.th/image7e25937f6259175c.png" alt="โลโก้บริษัท" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
             <h1>ระบบฝากรูปภาพส่วนกลาง</h1>
             <p>บจก.คาเคา ซีเอสอี (เชื่อมต่อ Google Drive อัตโนมัติ)</p>
@@ -111,6 +113,7 @@
         <div class="drop-zone" id="drop-zone">
             <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
             <span>แตะเพื่อเลือกรูปภาพ หรือ ลากไฟล์มาวางที่นี่</span>
+            <div class="paste-badge">✨ รองรับการกดยืนยัน (Ctrl+V / Cmd+V) วางรูปภาพได้เลย</div>
             <p>รองรับไฟล์ JPG, PNG, WEBP (ระบบจะทำการบีบอัดให้อัตโนมัติ)</p>
             <input type="file" id="file-input" accept="image/*">
         </div>
@@ -134,7 +137,7 @@
     </div>
 
     <script>
-        // นำ URL ที่ได้รับมอบหมายมาอัปเดตเรียบร้อยแล้ว
+        // API สำหรับอัปโหลดเข้าสู่ Google Drive ของบจก.คาเคา ซีเอสอี
         const UPLOAD_API_URL = 'https://script.google.com/macros/s/AKfycbw53T_Bq7bIIRbwEt1_vYR7h07FRla3BxgVhCgeYL-uglvwaci86WP0k_TH3jymnprLTw/exec';
 
         const fileInput = document.getElementById('file-input');
@@ -149,17 +152,41 @@
             setTimeout(() => { toast.remove(); }, 4000);
         }
 
+        // ==========================================
+        // 🚀 ระบบดักจับการกดวาง (Ctrl+V / Cmd+V)
+        // ==========================================
+        document.addEventListener('paste', (e) => {
+            // เช็คว่าหน้าจอไม่ได้โหลดอยู่
+            if(document.getElementById('loader').style.display === 'block') return;
+
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let index in items) {
+                const item = items[index];
+                if (item.kind === 'file' && item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    showToast('วางรูปภาพสำเร็จ', 'กำลังประมวลผลรูปภาพที่ก๊อปปี้มา...');
+                    handleUpload(file); // โยนไฟล์รูปเข้าสู่ระบบทันที
+                    break;
+                }
+            }
+        });
+
         // เอฟเฟกต์สำหรับการ Drag & Drop ลากไฟล์มาวาง
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault(); dropZone.classList.remove('dragover');
             if (e.dataTransfer.files.length > 0) {
-                fileInput.files = e.dataTransfer.files;
-                handleUpload();
+                handleUpload(e.dataTransfer.files[0]); // โยนไฟล์ที่ลากมาวางเข้าระบบ
             }
         });
-        fileInput.addEventListener('change', handleUpload);
+        
+        // สำหรับการคลิกเลือกรูปตามปกติ
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                handleUpload(fileInput.files[0]);
+            }
+        });
 
         // ฟังก์ชันบีบอัดรูปภาพเพื่อประสิทธิภาพสูงสุด
         function compressImage(file, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
@@ -191,10 +218,10 @@
             });
         }
 
-        // ฟังก์ชันดำเนินการอัปโหลดไฟล์
-        async function handleUpload() {
-            if (fileInput.files.length === 0) return;
-            const file = fileInput.files[0];
+        // ฟังก์ชันดำเนินการอัปโหลดไฟล์ (รองรับทั้งการวางรูป, ลากรูป, และกดเลือกรูป)
+        async function handleUpload(pastedFile = null) {
+            const file = pastedFile;
+            if (!file) return;
             
             // ปรับเปลี่ยนส่วนแสดงผลเพื่อแจ้งให้ผู้ใช้งานทราบ
             dropZone.style.display = 'none';
@@ -247,7 +274,7 @@
             copyText.select();
             copyText.setSelectionRange(0, 99999);
             navigator.clipboard.writeText(copyText.value);
-            showToast('คัดลอกสำเร็จ', 'ระบบได้ทำการคัดลอกลิงก์ไปยังคลิปบอร์ดแล้ว');
+            showToast('คัดลอกสำเร็จ', 'ระบบได้ทำการคัดลอกลิงก์ไปยังคลิปบอร์ดแล้ว นำไปวางในระบบคลังสินค้าได้เลย');
         }
 
         // ฟังก์ชันตั้งค่าเริ่มต้นเพื่อรองรับการอัปโหลดไฟล์ถัดไป
